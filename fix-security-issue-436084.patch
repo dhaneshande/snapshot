@@ -1,0 +1,67 @@
+From 4b979183cfbf5b457d273afe613e3ef8c9788cf9 Mon Sep 17 00:00:00 2001
+From: Bogdan Denkovych <bdenkovych@gitlab.com>
+Date: Fri, 5 Jan 2024 13:15:33 +0200
+Subject: [PATCH] Fix "Account Takeover via Password Reset without user
+ interactions"
+
+Related to https://gitlab.com/gitlab-org/gitlab/-/issues/436084
+---
+ .../concerns/recoverable_by_any_email.rb      | 25 ++++++++-----------
+ 1 file changed, 11 insertions(+), 14 deletions(-)
+
+diff --git a/app/models/concerns/recoverable_by_any_email.rb b/app/models/concerns/recoverable_by_any_email.rb
+index c946e7e78c68..7bd908597c94 100644
+--- a/app/models/concerns/recoverable_by_any_email.rb
++++ b/app/models/concerns/recoverable_by_any_email.rb
+@@ -1,37 +1,34 @@
+ # frozen_string_literal: true
+ 
+-# Concern that overrides the Devise methods
+-# to send reset password instructions to any verified user email
++# Concern that overrides the Devise methods to allow reset password instructions
++# to be sent to any users' confirmed secondary emails.
++# See https://github.com/heartcombo/devise/blob/main/lib/devise/models/recoverable.rb
+ module RecoverableByAnyEmail
+   extend ActiveSupport::Concern
+ 
+   class_methods do
+     def send_reset_password_instructions(attributes = {})
+-      email = attributes.delete(:email)
+-      super unless email
++      return super unless attributes[:email]
+ 
+-      recoverable = by_email_with_errors(email)
+-      recoverable.send_reset_password_instructions(to: email) if recoverable&.persisted?
+-      recoverable
+-    end
++      email = Email.confirmed.find_by(email: attributes[:email].to_s)
++      return super unless email
+ 
+-    private
++      recoverable = email.user
+ 
+-    def by_email_with_errors(email)
+-      record = find_by_any_email(email, confirmed: true) || new
+-      record.errors.add(:email, :invalid) unless record.persisted?
+-      record
++      recoverable.send_reset_password_instructions(to: email.email)
++      recoverable
+     end
+   end
+ 
+   def send_reset_password_instructions(opts = {})
+     token = set_reset_password_token
++
+     send_reset_password_instructions_notification(token, opts)
+ 
+     token
+   end
+ 
+-  private
++  protected
+ 
+   def send_reset_password_instructions_notification(token, opts = {})
+     send_devise_notification(:reset_password_instructions, token, opts)
+-- 
+2.43.0
+
